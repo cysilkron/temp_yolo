@@ -8,6 +8,7 @@ import imgaug.augmenters as iaa
 from utils.tools.image import get_segmap
 from utils.tools.datasets import MaskedImage
 from functools import partial
+from utils.paster.augment import adjust_hsv
 
 class LoadProductWithNoise:
     def __init__(self, rng_seed=1234) -> None:
@@ -86,7 +87,8 @@ class LoadProductWithNoise:
 
         lb_coco_aug = [
             iaa.Rotate((0,360)),
-            iaa.Resize((0.6, 0.8)),
+            iaa.Resize((0.5, 0.7)),
+            adjust_hsv()
         ]
         
 
@@ -99,6 +101,7 @@ class LoadProductWithNoise:
         eccsd_coco_aug = [
             iaa.Rotate((-45,45)),
             iaa.Resize((640,480)),
+            adjust_hsv()
         ]
         
         lb_transform = partial(self.next_batch_and_transform, self.lb_coco, lb_coco_aug)
@@ -112,7 +115,7 @@ class LoadProductWithNoise:
         ]
 
         item_per_img = bs if bs else self.rng.randint(min_rand_item, max_rand_item)
-        choosen_func_idxs = self.rng.choice(3, item_per_img, p=[0.6, 0.2, 0.2])
+        choosen_func_idxs = self.rng.choice(3, item_per_img, p=[0.65, 0.175, 0.175])
         
         # print(f"choosen_func:  {choosen_func}")
         # aug_imgs, aug_masks = list(zip([fn() for fn in batch_functions]))

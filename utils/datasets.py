@@ -31,6 +31,14 @@ from utils.general import check_dataset, check_requirements, check_yaml, clean_s
     xywh2xyxy, xywhn2xyxy, xyxy2xywhn, xyn2xy
 from utils.torch_utils import torch_distributed_zero_first
 
+
+# import yaml
+# from utils.paste_product import PasteProduct
+from utils.paster.create_paster import create_train_paster
+
+
+
+
 # Parameters
 HELP_URL = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
 IMG_FORMATS = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo']  # acceptable image suffixes
@@ -41,6 +49,8 @@ NUM_THREADS = min(8, os.cpu_count())  # number of multiprocessing threads
 for orientation in ExifTags.TAGS.keys():
     if ExifTags.TAGS[orientation] == 'Orientation':
         break
+
+
 
 
 def get_hash(paths):
@@ -155,8 +165,7 @@ class _RepeatSampler(object):
             yield from iter(self.sampler)
 
 
-class LoadImages:
-    # YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`
+class LoadImages:  # for inference
     def __init__(self, path, img_size=640, stride=32, auto=True):
         p = str(Path(path).resolve())  # os-agnostic absolute path
         if '*' in p:
@@ -238,7 +247,6 @@ class LoadImages:
 
 
 class LoadWebcam:  # for inference
-    # YOLOv5 local webcam dataloader, i.e. `python detect.py --source 0`
     def __init__(self, pipe='0', img_size=640, stride=32):
         self.img_size = img_size
         self.stride = stride
@@ -279,8 +287,7 @@ class LoadWebcam:  # for inference
         return 0
 
 
-class LoadStreams:
-    # YOLOv5 streamloader, i.e. `python detect.py --source 'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP streams`
+class LoadStreams:  # multiple IP or RTSP cameras
     def __init__(self, sources='streams.txt', img_size=640, stride=32, auto=True):
         self.mode = 'stream'
         self.img_size = img_size
@@ -312,7 +319,7 @@ class LoadStreams:
             self.frames[i] = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float('inf')  # infinite stream fallback
 
             _, self.imgs[i] = cap.read()  # guarantee first frame
-            self.threads[i] = Thread(target=self.update, args=([i, cap, s]), daemon=True)
+            self.threads[i] = Thread(target=self.update, args=([i, cap]), daemon=True)
             print(f" success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
             self.threads[i].start()
         print('')  # newline
@@ -323,7 +330,7 @@ class LoadStreams:
         if not self.rect:
             print('WARNING: Different stream shapes detected. For optimal performance supply similarly-shaped streams.')
 
-    def update(self, i, cap, stream):
+    def update(self, i, cap):
         # Read stream `i` frames in daemon thread
         n, f, read = 0, self.frames[i], 1  # frame number, frame array, inference every 'read' frame
         while cap.isOpened() and n < f:
@@ -332,12 +339,7 @@ class LoadStreams:
             cap.grab()
             if n % read == 0:
                 success, im = cap.retrieve()
-                if success:
-                    self.imgs[i] = im
-                else:
-                    print('WARNING: Video stream unresponsive, please check your IP camera connection.')
-                    self.imgs[i] *= 0
-                    cap.open(stream)  # re-open stream if signal was lost
+                self.imgs[i] = im if success else self.imgs[i] * 0
             time.sleep(1 / self.fps[i])  # wait time
 
     def __iter__(self):
@@ -373,8 +375,7 @@ def img2label_paths(img_paths):
     return [sb.join(x.rsplit(sa, 1)).rsplit('.', 1)[0] + '.txt' for x in img_paths]
 
 
-class LoadImagesAndLabels(Dataset):
-    # YOLOv5 train_loader/val_loader, loads images and labels for training and validation
+class LoadImagesAndLabels(Dataset):  # for training/testing
     cache_version = 0.5  # dataset labels *.cache version
 
     def __init__(self, path, img_size=640, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
@@ -389,6 +390,12 @@ class LoadImagesAndLabels(Dataset):
         self.stride = stride
         self.path = path
         self.albumentations = Albumentations() if augment else None
+
+        self.count = 0
+        if self.augment:
+            self.paster = create_train_paster()
+            
+
 
         try:
             f = []  # image files
@@ -541,7 +548,7 @@ class LoadImagesAndLabels(Dataset):
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
-
+        self.count += 1
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         if mosaic:
@@ -557,12 +564,28 @@ class LoadImagesAndLabels(Dataset):
             # Load image
             img, (h0, w0), (h, w) = load_image(self, index)
 
+            # ---------------- paste ---------------
+            labels = self.labels[index].copy()
+            
+
+            if self.augment and self.paster:
+
+                if labels.size:  
+                    labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h)
+                img, labels = self.paster._paste_on_labeled_img(img[...,::-1], labels) #BGR to RGB img
+                img = img[..., ::-1] #RGB to BGR img
+                hw_pasted = img.shape
+                labels[:, 1:] = xyxy2xywhn(labels[:, 1:], hw_pasted[1], hw_pasted[0])
+            # ---------------- paste end ---------------
+
+            
+
             # Letterbox
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
             img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
             shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
 
-            labels = self.labels[index].copy()
+            
             if labels.size:  # normalized xywh to pixel xyxy format
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
 
@@ -573,13 +596,16 @@ class LoadImagesAndLabels(Dataset):
                                                  scale=hyp['scale'],
                                                  shear=hyp['shear'],
                                                  perspective=hyp['perspective'])
-
+        
+        
+                                                 
         nl = len(labels)  # number of labels
-        if nl:
+        if nl: 
             labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1E-3)
 
         if self.augment:
             # Albumentations
+            
             img, labels = self.albumentations(img, labels)
             nl = len(labels)  # update after albumentations
 
@@ -668,7 +694,8 @@ def load_image(self, i):
 
 
 def load_mosaic(self, index):
-    # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
+    # loads images in a 4-mosaic
+
     labels4, segments4 = [], []
     s = self.img_size
     yc, xc = [int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border]  # mosaic center x, y
@@ -725,7 +752,8 @@ def load_mosaic(self, index):
 
 
 def load_mosaic9(self, index):
-    # YOLOv5 9-mosaic loader. Loads 1 image + 8 random images into a 9-image mosaic
+    # loads images in a 9-mosaic
+
     labels9, segments9 = [], []
     s = self.img_size
     indices = [index] + random.choices(self.indices, k=8)  # 8 additional image indices
@@ -943,22 +971,12 @@ def dataset_stats(path='coco128.yaml', autodownload=False, verbose=False, profil
             return False, None, path
 
     def hub_ops(f, max_dim=1920):
-        # HUB ops for 1 image 'f': resize and save at reduced quality in /dataset-hub for web/app viewing
-        f_new = im_dir / Path(f).name  # dataset-hub image filename
-        try:  # use PIL
-            im = Image.open(f)
-            r = max_dim / max(im.height, im.width)  # ratio
-            if r < 1.0:  # image too large
-                im = im.resize((int(im.width * r), int(im.height * r)))
-            im.save(f_new, quality=75)  # save
-        except Exception as e:  # use OpenCV
-            print(f'WARNING: HUB ops PIL failure {f}: {e}')
-            im = cv2.imread(f)
-            im_height, im_width = im.shape[:2]
-            r = max_dim / max(im_height, im_width)  # ratio
-            if r < 1.0:  # image too large
-                im = cv2.resize(im, (int(im_width * r), int(im_height * r)), interpolation=cv2.INTER_LINEAR)
-            cv2.imwrite(str(f_new), im)
+        # HUB ops for 1 image 'f'
+        im = Image.open(f)
+        r = max_dim / max(im.height, im.width)  # ratio
+        if r < 1.0:  # image too large
+            im = im.resize((int(im.width * r), int(im.height * r)))
+        im.save(im_dir / Path(f).name, quality=75)  # save
 
     zipped, data_dir, yaml_path = unzip(Path(path))
     with open(check_yaml(yaml_path), errors='ignore') as f:

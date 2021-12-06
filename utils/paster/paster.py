@@ -113,16 +113,19 @@ class DebugPaster(PasteMaskedImage):
         self.bbox_to_remove = []
 
         self.debug = debug
-        self.hyp_dict__overlap_thereshold = 0.4
+        self.hyp_dict__overlap_thereshold = 0.35
         self.init_debug_info()
 
     def create_labels(self):
         if not all_len_is_same(self.cls_ids, self.bboxes):
             raise ValueError('len of cls_ids and bboxes should be equal')
 
+        labels = np.zeros((len(self.visible_bboxes), 5))
+
         self.labels = np.zeros((len(self.bboxes), 5)) #[cls_id, *xyxy]
-        self.labels[:, 0] = self.cls_ids
-        self.labels[:, 1:] = self.bboxes
+        if len(self.bboxes):
+            self.labels[:, 0] = self.cls_ids
+            self.labels[:, 1:] = self.bboxes
 
     def _verify_labels(self):
         if not all_len_is_same(self.cls_ids, self.bboxes, self.is_visible_too_lows):
@@ -253,6 +256,18 @@ class DebugPaster(PasteMaskedImage):
         self.clean_labels()
 
         self.find_visible_bboxes()
+
+
+
+        labels = np.zeros((len(self.visible_bboxes), 5))
+
+        if len(self.visible_bboxes):
+            labels[:, 0] = np.array(self.cls_ids)
+            labels[:, 1:] = np.array(self.visible_bboxes)
+            labels = labels[~self.bbox_to_remove]
+
+        self.labels = labels
+
         if show_area_debug_info:
             self.print_diff_mask_area()
 
@@ -290,9 +305,11 @@ class PasteOnLabeledImage():
 
             db_paster = DebugPaster(back_img, save_mask=True, debug=self.debug)
             db_paster.batch_pasting_flow(n=None, coco=self.coco, **kwargs)
-            labels = None # ignore labels input
+            labels = None # ignore previous labels input
 
             # back_img, labels = self.paste_front_imgs(back_img, num2gen=1)
+
+            # return db_paster.back_img, labels
             return db_paster.back_img, db_paster.labels
 
 
