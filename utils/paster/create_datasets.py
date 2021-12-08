@@ -12,7 +12,10 @@ from utils.paster.augment import adjust_hsv
 
 class LoadProductWithNoise:
     def __init__(self, rng_seed=1234) -> None:
-        front_img_dpath = Path('/mnt/disks/lightbox_hand_eccsd-copy')
+        # front_img_dpath = Path('/mnt/disks/lightbox_hand_eccsd-copy')
+        '''jump'''
+        front_img_dpath = Path('/mnt/disks/datasets')
+
 
 
         self.load_lightbox(front_img_dpath/'lightbox_china_train'/'clean_coco.json', front_img_dpath)
