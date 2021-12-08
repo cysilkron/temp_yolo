@@ -16,9 +16,9 @@ if yolo_dir.is_dir():
 
 
 from typing import List
-from utils.yolo_utils.general import *
-import utils.yolo_utils.file_util as fu
-import utils.yolo_utils.plot_util as pu
+from utils.tools.general import *
+import utils.tools.file as fu
+
 from typing import List
 
 
