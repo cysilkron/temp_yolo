@@ -35,6 +35,7 @@ from utils.torch_utils import torch_distributed_zero_first
 # import yaml
 # from utils.paste_product import PasteProduct
 from utils.paster.create_paster import create_train_paster
+import imageio
 
 
 
@@ -391,10 +392,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.path = path
         self.albumentations = Albumentations() if augment else None
 
-        self.count = 0
+        self.item_count = 0
+        
         if self.augment:
-            self.paster = create_train_paster()
-            
+            self.paster = create_train_paster()            
 
 
         try:
@@ -541,14 +542,14 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         return len(self.img_files)
 
     # def __iter__(self):
-    #     self.count = -1
+    #     self.item_count = -1
     #     print('ran dataset iter')
     #     #self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
     #     return self
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
-        self.count += 1
+        self.item_count += 1
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         if mosaic:
@@ -573,9 +574,16 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 if labels.size:  
                     labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h)
                 img, labels = self.paster._paste_on_labeled_img(img[...,::-1], labels) #BGR to RGB img
+                debug_dir = Path.home()/'debug'
+                debug_dir.mkdir(parents=True, exist_ok=True)
+
+                if (self.item_count % 10 == 0):
+                    imageio.imsave(debug_dir/Path(self.img_files[index]).name, img)
                 img = img[..., ::-1] #RGB to BGR img
                 hw_pasted = img.shape
-                labels[:, 1:] = xyxy2xywhn(labels[:, 1:], hw_pasted[1], hw_pasted[0])
+                if labels.size:
+                    labels[:, 1:] = xyxy2xywhn(labels[:, 1:], hw_pasted[1], hw_pasted[0])
+            
             # ---------------- paste end ---------------
 
             
