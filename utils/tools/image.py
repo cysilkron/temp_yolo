@@ -53,8 +53,8 @@ def draw_bb(img, labels, size=3, has_cls_id=False):
     return bbs.draw_on_image(img, size=size)
 
 
-def show_bb(img, bbox, size=3):
-    imshow(draw_bb(img, bbox, size))
+def show_bb(img, bbox, **kwargs):
+    imshow(draw_bb(img, bbox, **kwargs))
 
 
 def bbox_from_mask(bool_mask):
